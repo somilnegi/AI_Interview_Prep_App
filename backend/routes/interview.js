@@ -1,81 +1,80 @@
 import express from "express";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import History from "../models/History.js";
+import ollama from "ollama";
 
 const router = express.Router();
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Generate interview questions
 router.post("/question", async (req, res) => {
   try {
     const { role, difficulty } = req.body;
 
-    const prompt = `Generate 5 ${difficulty || "medium"} level interview questions for the role: ${role}. 
-    Provide them as plain text, one per line.`
+      const prompt = `
+  Generate exactly 5 interview questions for a ${role}.
+  Do not include explanations, answers, bullet points, formatting, bold text, or extra commentary.
+  Output only the 5 questions, each on a new line.
+  `;
+    const result = await ollama.generate({
+      model: "gemma3:4b",
+      prompt: prompt
+    });
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-    const result = await model.generateContent(prompt);
-
-    const text = result.response.text();
-
-    res.json({ questions: text });
-  } catch (err) {
-    console.error("Gemini Error:", err);
-    res.status(500).json({ error: err.message });
+    res.json({ questions: result.response });
+  } catch (error) {
+    console.error("Ollama Error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Evaluate user answer (auth removed)
+// Evaluate user answer
 router.post("/evaluate", async (req, res) => {
   try {
     const { question, answer, role } = req.body;
 
     const prompt = `
-Evaluate the following interview answer.
+Evaluate this interview answer.
 
 Question: ${question}
 Answer: ${answer}
 
-Respond ONLY in JSON format like this:
+Return feedback ONLY in JSON format:
 {
   "score": 0-10,
-  "keyMistakes": "list mistakes",
-  "improvedAnswer": "a better version of the answer"
+  "keyMistakes": "...",
+  "improvedAnswer": "..."
 }
 `;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const result = await ollama.generate({
+      model: "gemma3:4b",
+      prompt: prompt
+    });
 
-    const result = await model.generateContent(prompt);
-
-    const evaluation = result.response.text();
-
-    // Save result
     await History.create({
-      userId: "TEMP_USER",
+      userId: req.body.userId || "testUser",
       role,
       question,
       userAnswer: answer,
-      evaluation: evaluation,
+      evaluation: result.response
     });
 
-    res.json({ evaluation });
-  } catch (err) {
-    console.error("Gemini Error:", err);
-    res.status(500).json({ error: err.message });
+    res.json({ evaluation: result.response });
+  } catch (error) {
+    console.error("Evaluation Error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Fetch history
+// Get history
 router.get("/history", async (req, res) => {
   try {
-    const data = await History.find({ userId: "TEMP_USER" }).sort({ createdAt: -1 });
+    const data = await History.find({
+      userId: req.query.userId || "testUser"
+    }).sort({ createdAt: -1 });
 
     res.json({ history: data });
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error("History Error:", error);
     res.status(500).json({ error: "Failed to fetch history" });
   }
 });
