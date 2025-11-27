@@ -31,19 +31,29 @@ router.post("/evaluate", async (req, res) => {
   try {
     const { question, answer, role } = req.body;
 
-    const prompt = `
-Evaluate this interview answer.
+   const prompt = `
+You are an AI interview evaluator. Analyze the answer STRICTLY and return ONLY valid JSON. 
+Do NOT include backticks, do NOT include markdown.
 
 Question: ${question}
 Answer: ${answer}
 
-Return feedback ONLY in JSON format:
+Return ONLY this exact JSON structure:
+
 {
-  "score": 0-10,
-  "keyMistakes": "...",
-  "improvedAnswer": "..."
+  "score": number (0-10),
+  "keyMistakes": "string",
+  "improvedAnswer": "string"
 }
+
+Rules:
+- "score" must be a number only.
+- "keyMistakes" must clearly list what was missing.
+- "improvedAnswer" must be a polished, perfect version of the answer.
+- Do NOT include triple backticks.
+- Do NOT add explanation outside the JSON.
 `;
+
 
     const result = await ollama.generate({
       model: "gemma3:4b",
