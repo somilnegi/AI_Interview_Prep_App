@@ -13,7 +13,7 @@ connectDB();
 const app = express();
 app.use(cors()); //avoids browser CORS errors for requests from your frontend domain.
 app.use(express.json()); //parses JSON bodies (API uses JSON).
-app.use("/auth", authRoutes);
+app.use("/api/auth", authRoutes);
 app.use("/api/interview", interviewRoutes);
 
 app.get("/", (req, res) => {
