@@ -3,19 +3,49 @@ import joblib
 import numpy as np
 import os
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(BASE_DIR, "model.pkl")
+try:
+    # -----------------------------
+    # Validate arguments
+    # -----------------------------
+    if len(sys.argv) != 3:
+        print("0,0")
+        sys.exit(1)
 
-model = joblib.load(model_path)
+    avgScore = float(sys.argv[1])
+    difficulty = int(sys.argv[2])
 
-avgScore = float(sys.argv[1])
-difficulty = int(sys.argv[2])
+    # -----------------------------
+    # Input validation
+    # -----------------------------
+    if not (0 <= avgScore <= 10):
+        print("0,0")
+        sys.exit(1)
 
-input_data = np.array([[avgScore, difficulty]])
+    if difficulty not in [1, 2, 3]:
+        print("0,0")
+        sys.exit(1)
 
-prediction = model.predict(input_data)[0]
-probability = model.predict_proba(input_data)[0][1]  # probability of class 1
+    # -----------------------------
+    # Load model safely
+    # -----------------------------
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(BASE_DIR, "model.pkl")
 
-confidence = round(probability * 100, 2)
+    model = joblib.load(model_path)
 
-print(f"{prediction},{confidence}")
+    # -----------------------------
+    # Make prediction
+    # -----------------------------
+    input_data = np.array([[avgScore, difficulty]])
+
+    prediction = model.predict(input_data)[0]
+    probability = model.predict_proba(input_data)[0][1]
+
+    confidence = round(probability * 100, 2)
+
+    # Always print in fixed format
+    print(f"{prediction},{confidence}")
+
+except Exception as e:
+    # Never crash Node
+    print("0,0")

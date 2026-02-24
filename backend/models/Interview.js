@@ -1,27 +1,79 @@
 import mongoose from "mongoose";
 
-const interviewSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
+const questionSchema = new mongoose.Schema(
+  {
+    questionText: { type: String, required: true },
+    userAnswer: { type: String },
+    aiEvaluation: { type: String },
+    score: { type: Number, min: 0, max: 10 },
   },
-  role: { type: String, required: true },
-  difficulty: { type: String, default: "medium" },
-  currentQuestionNumber: { type: Number, default: 0 },
-  maxQuestions: { type: Number, default: 5 },
+  { _id: false },
+);
 
-  questions: [{
-    questionText: String,
-    userAnswer: String,
-    aiEvaluation: String,
-    score: Number
-  }],
+const interviewSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
 
-  totalScore: { type: Number, default: 0 },
-  averageScore: { type: Number, default: 0 },
-  feedbackSummary: String
-}, { timestamps: true });
+    role: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
+    difficulty: {
+      type: String,
+      enum: ["easy", "medium", "hard"],
+      default: "medium",
+    },
+
+    status: {
+      type: String,
+      enum: ["ongoing", "completed"],
+      default: "ongoing",
+    },
+
+    currentQuestionNumber: {
+      type: Number,
+      default: 0,
+    },
+
+    maxQuestions: {
+      type: Number,
+      default: 5,
+    },
+
+    questions: [questionSchema],
+
+    totalScore: {
+      type: Number,
+      default: 0,
+    },
+
+    averageScore: {
+      type: Number,
+      default: 0,
+    },
+
+    // 🔥 ML Fields
+    readinessPrediction: {
+      type: String,
+      enum: ["READY", "NOT READY"],
+    },
+
+    confidenceScore: {
+      type: Number,
+      min: 0,
+      max: 100,
+    },
+
+    feedbackSummary: String,
+  },
+  { timestamps: true },
+);
 
 export default mongoose.model("Interview", interviewSchema);
