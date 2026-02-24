@@ -1,91 +1,193 @@
 import express from "express";
-import History from "../models/History.js";
 import ollama from "ollama";
+import Interview from "../models/Interview.js";
+import auth from "../middleware/auth.js";
+import { getPrediction } from "../services/mlService.js";
 
 const router = express.Router();
 
-// Generate interview questions
-router.post("/question", async (req, res) => {
+function difficultyToNumber(level) {
+  if (level === "easy") return 1;
+  if (level === "medium") return 2;
+  if (level === "hard") return 3;
+}
+
+// ==========================
+// START INTERVIEW
+// ==========================
+router.post("/start", auth, async (req, res) => {
   try {
     const { role, difficulty } = req.body;
 
-      const prompt = `
-  Generate exactly 5 interview questions for a ${role}.
-  Do not include explanations, answers, bullet points, formatting, bold text, or extra commentary.
-  Output only the 5 questions, each on a new line.
-  `;
-    const result = await ollama.generate({
-      model: "gemma3:4b",
-      prompt: prompt
+    const interview = await Interview.create({
+      user: req.user.id,
+      role,
+      difficulty: difficulty || "medium",
+      currentQuestionNumber: 0,
+      maxQuestions: 5,
     });
 
-    res.json({ questions: result.response });
-  } catch (error) {
-    console.error("Ollama Error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(201).json({ interviewId: interview._id });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to start interview" });
   }
 });
 
-// Evaluate user answer
-router.post("/evaluate", async (req, res) => {
+// ==========================
+// GENERATE NEXT QUESTION (Adaptive)
+// ==========================
+router.post("/next-question", auth, async (req, res) => {
   try {
-    const { question, answer, role } = req.body;
+    const { interviewId } = req.body;
 
-   const prompt = `
-You are an AI interview evaluator. Analyze the answer STRICTLY and return ONLY valid JSON. 
-Do NOT include backticks, do NOT include markdown.
+    const interview = await Interview.findById(interviewId);
+
+    if (!interview)
+      return res.status(404).json({ error: "Interview not found" });
+
+    // Security check
+    if (interview.user.toString() !== req.user.id)
+      return res.status(403).json({ error: "Unauthorized access" });
+
+    if (interview.currentQuestionNumber >= interview.maxQuestions) {
+      return res.json({ message: "Interview finished" });
+    }
+
+    const prompt = `
+Generate ONE ${interview.difficulty} level interview question 
+for a ${interview.role}.
+Return only the question.
+`;
+
+    const result = await ollama.generate({
+      model: "gemma3:4b",
+      prompt,
+    });
+
+    interview.currentQuestionNumber += 1;
+    await interview.save();
+
+    res.json({ question: result.response });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to generate question" });
+  }
+});
+
+// ==========================
+// EVALUATE ANSWER + ADAPT
+// ==========================
+router.post("/evaluate", auth, async (req, res) => {
+  try {
+    const { interviewId, question, answer } = req.body;
+
+    const interview = await Interview.findById(interviewId);
+
+    if (!interview)
+      return res.status(404).json({ error: "Interview not found" });
+
+    if (interview.user.toString() !== req.user.id)
+      return res.status(403).json({ error: "Unauthorized access" });
+
+    const prompt = `
+You are an AI interview evaluator. 
+Return STRICT JSON only.
+
+{
+ "score": number (0-10),
+ "keyMistakes": "string",
+ "improvedAnswer": "string"
+}
 
 Question: ${question}
 Answer: ${answer}
-
-Return ONLY this exact JSON structure:
-
-{
-  "score": number (0-10),
-  "keyMistakes": "string",
-  "improvedAnswer": "string"
-}
-
-Rules:
-- "score" must be a number only.
-- "keyMistakes" must clearly list what was missing.
-- "improvedAnswer" must be a polished, perfect version of the answer.
-- Do NOT include triple backticks.
-- Do NOT add explanation outside the JSON.
 `;
-
 
     const result = await ollama.generate({
       model: "gemma3:4b",
-      prompt: prompt
+      prompt,
     });
 
-    await History.create({
-      userId: req.body.userId || "testUser",
-      role,
-      question,
+    let parsed;
+    try {
+      parsed = JSON.parse(result.response);
+    } catch {
+      return res.status(500).json({ error: "Invalid AI response format" });
+    }
+
+    // Store question
+    interview.questions.push({
+      questionText: question,
       userAnswer: answer,
-      evaluation: result.response
+      aiEvaluation: parsed.keyMistakes,
+      score: parsed.score,
     });
 
-    res.json({ evaluation: result.response });
-  } catch (error) {
-    console.error("Evaluation Error:", error);
-    res.status(500).json({ error: error.message });
+    // ==========================
+    // ADAPTIVE DIFFICULTY LOGIC
+    // ==========================
+    if (parsed.score >= 8 && interview.difficulty !== "hard") {
+      interview.difficulty =
+        interview.difficulty === "easy" ? "medium" : "hard";
+    }
+
+    if (parsed.score <= 4 && interview.difficulty !== "easy") {
+      interview.difficulty =
+        interview.difficulty === "hard" ? "medium" : "easy";
+    }
+
+    await interview.save();
+
+    res.json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: "Evaluation failed" });
   }
 });
 
-// Get history
-router.get("/history", async (req, res) => {
+// ==========================
+// END INTERVIEW + CALCULATE
+// ==========================
+router.post("/end", auth, async (req, res) => {
   try {
-    const data = await History.find({
-      userId: req.query.userId || "testUser"
-    }).sort({ createdAt: -1 });
+    const { interviewId } = req.body;
 
-    res.json({ history: data });
-  } catch (error) {
-    console.error("History Error:", error);
-    res.status(500).json({ error: "Failed to fetch history" });
+    const interview = await Interview.findById(interviewId);
+
+    if (!interview)
+      return res.status(404).json({ error: "Interview not found" });
+
+    if (interview.user.toString() !== req.user.id)
+      return res.status(403).json({ error: "Unauthorized access" });
+
+    if (interview.questions.length === 0)
+      return res.status(400).json({ error: "No questions answered" });
+
+    const total = interview.questions.reduce((sum, q) => sum + q.score, 0);
+
+    interview.totalScore = total;
+    interview.averageScore = total / interview.questions.length;
+
+    await interview.save();
+
+    // =====================
+    // ML PREDICTION PART
+    // =====================
+
+    const difficultyNumber = difficultyToNumber(interview.difficulty);
+
+    const mlResult = await getPrediction(
+      interview.averageScore,
+      difficultyNumber,
+    );
+
+    res.json({
+      totalScore: interview.totalScore,
+      averageScore: interview.averageScore,
+      readinessPrediction: mlResult.prediction === "1" ? "READY" : "NOT READY",
+      confidenceScore: mlResult.confidence,
+    });
+  } catch (err) {
+    console.error("End Interview Error:", err);
+    res.status(500).json({ error: "Failed to end interview" });
   }
 });
 
