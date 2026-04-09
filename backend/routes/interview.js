@@ -21,7 +21,6 @@ const router = express.Router();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Verify interview ownership and status in one call. */
 async function loadInterview(interviewId, userId, requireOngoing = true) {
   const interview = await Interview.findById(interviewId);
   if (!interview) {
@@ -42,12 +41,10 @@ async function loadInterview(interviewId, userId, requireOngoing = true) {
   return interview;
 }
 
-/** Build the LLM user message for requesting the next question. */
 function buildQuestionPrompt(interview) {
   const qNum = interview.currentQuestionNumber + 1;
   const total = interview.maxQuestions;
   const difficultyLabel = thetaToDifficultyLabel(interview.theta);
-
   return {
     role: "user",
     content:
@@ -60,9 +57,6 @@ function buildQuestionPrompt(interview) {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-/**
- * GET /api/interview/stats
- */
 router.get("/stats", authMiddleware, async (req, res, next) => {
   try {
     const completed = await Interview.find({
@@ -90,9 +84,6 @@ router.get("/stats", authMiddleware, async (req, res, next) => {
   }
 });
 
-/**
- * GET /api/interview/history
- */
 router.get("/history", authMiddleware, async (req, res, next) => {
   try {
     const interviews = await Interview.find({
@@ -113,9 +104,6 @@ router.get("/history", authMiddleware, async (req, res, next) => {
   }
 });
 
-/**
- * POST /api/interview/start
- */
 router.post("/start", authMiddleware, async (req, res, next) => {
   try {
     const { role, difficulty, maxQuestions, useResume } = req.body;
@@ -173,19 +161,14 @@ router.post("/start", authMiddleware, async (req, res, next) => {
       conversationHistory: [{ role: "system", content: systemMessage }],
     });
 
-    res.status(201).json({
-      interviewId: interview._id,
-      resumeBased,
-      initialTheta,
-    });
+    res
+      .status(201)
+      .json({ interviewId: interview._id, resumeBased, initialTheta });
   } catch (err) {
     next(err);
   }
 });
 
-/**
- * GET /api/interview/next-question-stream/:interviewId
- */
 router.get(
   "/next-question-stream/:interviewId",
   authMiddleware,
@@ -224,7 +207,6 @@ router.get(
       res.setHeader("X-Accel-Buffering", "no");
 
       const questionText = await chatStream(messages, res);
-
       const questionIrtParams = defaultIrtParams(
         thetaToDifficultyLabel(interview.theta),
       );
@@ -239,14 +221,10 @@ router.get(
       await interview.save();
     } catch (err) {
       if (!res.headersSent) next(err);
-      else console.error("[next-question-stream]", err);
     }
   },
 );
 
-/**
- * POST /api/interview/next-question (non-streaming fallback)
- */
 router.post("/next-question", authMiddleware, async (req, res, next) => {
   try {
     const { interviewId } = req.body;
@@ -254,9 +232,7 @@ router.post("/next-question", authMiddleware, async (req, res, next) => {
 
     if (interview.questions.length >= 1) {
       const lastQ = interview.questions[interview.questions.length - 1];
-      if (!lastQ.userAnswer) {
-        return res.json({ question: lastQ.questionText });
-      }
+      if (!lastQ.userAnswer) return res.json({ question: lastQ.questionText });
     }
 
     if (interview.currentQuestionNumber >= interview.maxQuestions) {
@@ -266,7 +242,6 @@ router.post("/next-question", authMiddleware, async (req, res, next) => {
     const userMsg = buildQuestionPrompt(interview);
     const messages = [...interview.conversationHistory, userMsg];
     const questionText = await chat(messages);
-
     const questionIrtParams = defaultIrtParams(
       thetaToDifficultyLabel(interview.theta),
     );
@@ -290,12 +265,6 @@ router.post("/next-question", authMiddleware, async (req, res, next) => {
   }
 });
 
-/**
- * POST /api/interview/evaluate
- *
- * Now detects question type and applies type-appropriate rubric weights.
- * Returns questionType so the frontend can hide irrelevant rubric bars.
- */
 router.post("/evaluate", authMiddleware, async (req, res, next) => {
   try {
     const { interviewId, answer } = req.body;
@@ -305,8 +274,8 @@ router.post("/evaluate", authMiddleware, async (req, res, next) => {
     }
 
     const interview = await loadInterview(interviewId, req.user.id);
-
     const lastQuestion = interview.questions[interview.questions.length - 1];
+
     if (!lastQuestion) {
       return res.status(400).json({ error: "No question to evaluate" });
     }
@@ -316,7 +285,6 @@ router.post("/evaluate", authMiddleware, async (req, res, next) => {
         .json({ error: "This question has already been evaluated" });
     }
 
-    // 1. Rubric evaluation — now type-aware
     const currentDifficultyLabel = thetaToDifficultyLabel(interview.theta);
     const evaluation = await evaluateAnswer(
       interview.role,
@@ -325,17 +293,15 @@ router.post("/evaluate", authMiddleware, async (req, res, next) => {
       currentDifficultyLabel,
     );
 
-    // 2. Persist answer + rubric
-    lastQuestion.userAnswer        = answer.trim().slice(0, 5000);
-    lastQuestion.aiEvaluation      = evaluation.keyMistakes;
+    lastQuestion.userAnswer = answer.trim().slice(0, 5000);
+    lastQuestion.aiEvaluation = evaluation.keyMistakes;
     lastQuestion.strengthHighlight = evaluation.strengthHighlight;
-    lastQuestion.improvedAnswer    = evaluation.improvedAnswer;
-    lastQuestion.score             = evaluation.score;
-    lastQuestion.rubric            = evaluation.rubric;
+    lastQuestion.improvedAnswer = evaluation.improvedAnswer;
+    lastQuestion.score = evaluation.score;
+    lastQuestion.rubric = evaluation.rubric;
 
     interview.conversationHistory.push({ role: "user", content: answer });
 
-    // 3. IRT theta update
     const answeredItems = interview.questions
       .filter((q) => q.score !== undefined)
       .map((q) => ({ score: q.score, irtParams: q.irtParams }));
@@ -345,13 +311,13 @@ router.post("/evaluate", authMiddleware, async (req, res, next) => {
       interview.theta,
     );
 
-    lastQuestion.thetaAtAnswer  = theta;
-    interview.theta             = theta;
-    interview.thetaSE           = se;
-    interview.thetaTotalInfo    = totalInfo;
+    lastQuestion.thetaAtAnswer = theta;
+    interview.theta = theta;
+    interview.thetaSE = se;
+    interview.thetaTotalInfo = totalInfo;
     interview.thetaHistory.push(theta);
-    interview.abilityLevel      = thetaToAbilityDescription(theta);
-    interview.difficulty        = thetaToDifficultyLabel(theta);
+    interview.abilityLevel = thetaToAbilityDescription(theta);
+    interview.difficulty = thetaToDifficultyLabel(theta);
 
     const adaptationComplete = shouldStopAdapting(
       se,
@@ -362,15 +328,15 @@ router.post("/evaluate", authMiddleware, async (req, res, next) => {
     await interview.save();
 
     res.json({
-      score:             evaluation.score,
-      rubric:            evaluation.rubric,
-      questionType:      evaluation.questionType,   // ← NEW
-      keyMistakes:       evaluation.keyMistakes,
+      score: evaluation.score,
+      rubric: evaluation.rubric,
+      questionType: evaluation.questionType,
+      keyMistakes: evaluation.keyMistakes,
       strengthHighlight: evaluation.strengthHighlight,
-      improvedAnswer:    evaluation.improvedAnswer,
+      improvedAnswer: evaluation.improvedAnswer,
       theta,
-      thetaSE:           se,
-      abilityLevel:      interview.abilityLevel,
+      thetaSE: se,
+      abilityLevel: interview.abilityLevel,
       currentDifficulty: interview.difficulty,
       adaptationComplete,
     });
@@ -379,9 +345,6 @@ router.post("/evaluate", authMiddleware, async (req, res, next) => {
   }
 });
 
-/**
- * POST /api/interview/end
- */
 router.post("/end", authMiddleware, async (req, res, next) => {
   try {
     const { interviewId } = req.body;
@@ -394,12 +357,12 @@ router.post("/end", authMiddleware, async (req, res, next) => {
       return res.status(400).json({ error: "No questions answered" });
     }
 
-    const total   = answeredQuestions.reduce((s, q) => s + q.score, 0);
+    const total = answeredQuestions.reduce((s, q) => s + q.score, 0);
     const average = parseFloat((total / answeredQuestions.length).toFixed(2));
 
-    interview.totalScore  = total;
+    interview.totalScore = total;
     interview.averageScore = average;
-    interview.skillGapMap  = computeSkillGapMap(answeredQuestions);
+    interview.skillGapMap = computeSkillGapMap(answeredQuestions);
 
     const mlResult = getPrediction(
       interview.theta,
@@ -407,12 +370,13 @@ router.post("/end", authMiddleware, async (req, res, next) => {
       interview.skillGapMap,
     );
     interview.readinessPrediction = mlResult.prediction;
-    interview.confidenceScore     = mlResult.confidence;
-    interview.abilityLevel        = thetaToAbilityDescription(interview.theta);
+    interview.confidenceScore = mlResult.confidence;
+    interview.abilityLevel = thetaToAbilityDescription(interview.theta);
 
-    const weakAreas   = interview.skillGapMap?.weakAreas?.join(", ")  || "none";
-    const strongAreas = interview.skillGapMap?.strongAreas?.join(", ") || "none";
-    const keyIssues   = answeredQuestions
+    const weakAreas = interview.skillGapMap?.weakAreas?.join(", ") || "none";
+    const strongAreas =
+      interview.skillGapMap?.strongAreas?.join(", ") || "none";
+    const keyIssues = answeredQuestions
       .map((q) => q.aiEvaluation)
       .filter(Boolean)
       .join(" | ");
@@ -440,24 +404,31 @@ router.post("/end", authMiddleware, async (req, res, next) => {
     ];
 
     interview.feedbackSummary = await chat(summaryMessages);
-    interview.status          = "completed";
-
+    interview.status = "completed";
     await interview.save();
 
-    const user    = await User.findById(req.user.id);
+    const user = await User.findById(req.user.id);
     const newTotal = user.totalInterviews + 1;
-    const newAvg   = parseFloat(
-      ((user.averagePerformance * user.totalInterviews + average) / newTotal).toFixed(2),
+    const newAvg = parseFloat(
+      (
+        (user.averagePerformance * user.totalInterviews + average) /
+        newTotal
+      ).toFixed(2),
     );
 
     const dims = [
-      "clarity", "depth", "relevance", "communication", "starStructure", "specificity",
+      "clarity",
+      "depth",
+      "relevance",
+      "communication",
+      "starStructure",
+      "specificity",
     ];
-    const newSkillHistory   = {};
-    const sessionAverages   = interview.skillGapMap?.averages || {};
+    const newSkillHistory = {};
+    const sessionAverages = interview.skillGapMap?.averages || {};
     for (const dim of dims) {
-      const prev  = user.skillHistory?.[dim] ?? 0;
-      const fresh = sessionAverages[dim]     ?? 0;
+      const prev = user.skillHistory?.[dim] ?? 0;
+      const fresh = sessionAverages[dim] ?? 0;
       newSkillHistory[dim] = parseFloat(
         ((prev * user.totalInterviews + fresh) / newTotal).toFixed(2),
       );
@@ -469,35 +440,32 @@ router.post("/end", authMiddleware, async (req, res, next) => {
         : Math.max(user.bestTheta, interview.theta);
 
     await User.findByIdAndUpdate(req.user.id, {
-      $inc:  { totalInterviews: 1 },
+      $inc: { totalInterviews: 1 },
       $push: { interviews: interview._id, thetaHistory: interview.theta },
-      $set:  {
+      $set: {
         averagePerformance: newAvg,
-        bestTheta:          newBestTheta,
-        skillHistory:       newSkillHistory,
+        bestTheta: newBestTheta,
+        skillHistory: newSkillHistory,
       },
     });
 
     res.json({
-      totalScore:         interview.totalScore,
-      averageScore:       interview.averageScore,
-      theta:              interview.theta,
-      thetaHistory:       interview.thetaHistory,
-      abilityLevel:       interview.abilityLevel,
-      skillGapMap:        interview.skillGapMap,
-      readinessPrediction:interview.readinessPrediction,
-      confidenceScore:    interview.confidenceScore,
-      predictionRationale:mlResult.rationale,
-      feedbackSummary:    interview.feedbackSummary,
+      totalScore: interview.totalScore,
+      averageScore: interview.averageScore,
+      theta: interview.theta,
+      thetaHistory: interview.thetaHistory,
+      abilityLevel: interview.abilityLevel,
+      skillGapMap: interview.skillGapMap,
+      readinessPrediction: interview.readinessPrediction,
+      confidenceScore: interview.confidenceScore,
+      predictionRationale: mlResult.rationale,
+      feedbackSummary: interview.feedbackSummary,
     });
   } catch (err) {
     next(err);
   }
 });
 
-/**
- * GET /api/interview/:interviewId
- */
 router.get("/:interviewId", authMiddleware, async (req, res, next) => {
   try {
     const interview = await loadInterview(
@@ -505,26 +473,25 @@ router.get("/:interviewId", authMiddleware, async (req, res, next) => {
       req.user.id,
       false,
     );
-
     res.json({
-      _id:                interview._id,
-      role:               interview.role,
-      difficulty:         interview.difficulty,
-      status:             interview.status,
-      totalScore:         interview.totalScore,
-      averageScore:       interview.averageScore,
-      theta:              interview.theta,
-      thetaHistory:       interview.thetaHistory,
-      thetaSE:            interview.thetaSE,
-      abilityLevel:       interview.abilityLevel,
-      skillGapMap:        interview.skillGapMap,
-      readinessPrediction:interview.readinessPrediction,
-      confidenceScore:    interview.confidenceScore,
-      feedbackSummary:    interview.feedbackSummary,
-      maxQuestions:       interview.maxQuestions,
-      resumeBased:        interview.resumeBased,
-      createdAt:          interview.createdAt,
-      questions:          interview.questions,
+      _id: interview._id,
+      role: interview.role,
+      difficulty: interview.difficulty,
+      status: interview.status,
+      totalScore: interview.totalScore,
+      averageScore: interview.averageScore,
+      theta: interview.theta,
+      thetaHistory: interview.thetaHistory,
+      thetaSE: interview.thetaSE,
+      abilityLevel: interview.abilityLevel,
+      skillGapMap: interview.skillGapMap,
+      readinessPrediction: interview.readinessPrediction,
+      confidenceScore: interview.confidenceScore,
+      feedbackSummary: interview.feedbackSummary,
+      maxQuestions: interview.maxQuestions,
+      resumeBased: interview.resumeBased,
+      createdAt: interview.createdAt,
+      questions: interview.questions,
     });
   } catch (err) {
     next(err);

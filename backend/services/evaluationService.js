@@ -1,28 +1,22 @@
 import { chat } from "./aiService.js";
 
-// ─── Rubric Weights by Question Type ─────────────────────────────────────────
-//
-// STAR structure is only meaningful for behavioural questions.
-// For technical questions (explain, compare, define) STAR is irrelevant —
-// zeroing its weight and redistributing to depth/clarity avoids unfair penalisation.
-//
-// Weights must sum to 1.0 for each type.
+// ─── Rubric weights per question type ────────────────────────────────────────
 
 const WEIGHTS_BEHAVIOURAL = {
   clarity: 0.15,
   depth: 0.25,
   relevance: 0.2,
   communication: 0.1,
-  starStructure: 0.2, // STAR is the primary signal for behavioural answers
+  starStructure: 0.2,
   specificity: 0.1,
 };
 
 const WEIGHTS_TECHNICAL = {
   clarity: 0.2,
-  depth: 0.35, // depth matters most for technical questions
+  depth: 0.35,
   relevance: 0.25,
   communication: 0.1,
-  starStructure: 0.0, // irrelevant — do NOT penalise
+  starStructure: 0.0,
   specificity: 0.1,
 };
 
@@ -31,14 +25,11 @@ const WEIGHTS_GENERAL = {
   depth: 0.3,
   relevance: 0.25,
   communication: 0.1,
-  starStructure: 0.1, // partial credit — helpful but not required
+  starStructure: 0.1,
   specificity: 0.1,
 };
 
-// ─── Question Type Detection ──────────────────────────────────────────────────
-//
-// Classify questions so we can apply the right rubric weights and
-// give the LLM the right instruction about STAR scoring.
+// ─── Question type detection ──────────────────────────────────────────────────
 
 const BEHAVIOURAL_SIGNALS = [
   "tell me about a time",
@@ -85,89 +76,44 @@ const TECHNICAL_SIGNALS = [
   "disadvantages",
 ];
 
-/**
- * Classify a question as behavioural, technical, or general.
- * @param {string} questionText
- * @returns {"behavioural" | "technical" | "general"}
- */
 export function detectQuestionType(questionText) {
   const q = questionText.toLowerCase().trim();
-
-  const isBehavioural = BEHAVIOURAL_SIGNALS.some((s) => q.includes(s));
-  if (isBehavioural) return "behavioural";
-
-  const isTechnical = TECHNICAL_SIGNALS.some((s) => q.includes(s));
-  if (isTechnical) return "technical";
-
+  if (BEHAVIOURAL_SIGNALS.some((s) => q.includes(s))) return "behavioural";
+  if (TECHNICAL_SIGNALS.some((s) => q.includes(s))) return "technical";
   return "general";
 }
 
-// ─── Anchor Examples ──────────────────────────────────────────────────────────
-// Separate anchor sets per question type so the LLM is calibrated correctly
-// and doesn't confuse STAR scoring across types.
+// ─── Anchor examples (few-shot calibration) ───────────────────────────────────
 
 const ANCHORS_BEHAVIOURAL = `
-ANCHOR EXAMPLES for BEHAVIOURAL questions:
+ANCHOR EXAMPLES — BEHAVIOURAL:
+Strong: "In my last role, a teammate and I disagreed on the API design. I scheduled a sync, prepared a pros/cons doc, and we agreed on REST. Feature shipped on time."
+→ clarity=9, depth=7, relevance=9, communication=9, starStructure=9, specificity=9
 
-Example 1 — Strong answer:
-Answer: "In my last role, a teammate and I disagreed on the API design. I scheduled a 30-min sync, prepared a comparison doc with pros/cons, and we agreed on a REST approach. The feature shipped on time and my manager praised the documentation."
-Expected: clarity=9, depth=7, relevance=9, communication=9, starStructure=9, specificity=9
-
-Example 2 — Weak answer:
-Answer: "I usually try to talk to the person and sort it out. I think communication is important in teams."
-Expected: clarity=5, depth=2, relevance=4, communication=4, starStructure=1, specificity=1
+Weak: "I usually try to talk to the person and sort it out."
+→ clarity=5, depth=2, relevance=4, communication=4, starStructure=1, specificity=1
 `.trim();
 
 const ANCHORS_TECHNICAL = `
-ANCHOR EXAMPLES for TECHNICAL questions:
+ANCHOR EXAMPLES — TECHNICAL:
+Strong (let vs const): "Both are block-scoped unlike var. const prevents reassignment but doesn't make objects immutable — you can still mutate properties. Use const by default, let only when you need to reassign."
+→ clarity=9, depth=9, relevance=10, communication=9, starStructure=5, specificity=9
 
-Example 1 — Strong answer (difference between let and const):
-Answer: "Both let and const are block-scoped, unlike var which is function-scoped. The key difference is that const binds a variable to a value that cannot be reassigned — so const x = 5 means x can never point to a different value. let allows reassignment. Note that const does not make objects immutable — you can still mutate object properties. Use const by default and only reach for let when you know you need to reassign."
-Expected: clarity=9, depth=9, relevance=10, communication=9, starStructure=5, specificity=9
-
-Example 2 — Weak answer:
-Answer: "const can't be changed and let can."
-Expected: clarity=5, depth=2, relevance=6, communication=4, starStructure=5, specificity=3
-
-Example 3 — Strong answer (algorithm question):
-Answer: "I'd use a min-heap to track the k largest elements. Insertion is O(log k) and we maintain exactly k elements so space is O(k). Total time is O(n log k) which beats sorting at O(n log n) for large n."
-Expected: clarity=9, depth=9, relevance=10, communication=8, starStructure=5, specificity=9
-
-Example 4 — Weak answer:
-Answer: "I would sort the array and pick from it."
-Expected: clarity=5, depth=3, relevance=6, communication=4, starStructure=5, specificity=3
+Weak: "const can't be changed and let can."
+→ clarity=5, depth=2, relevance=6, communication=4, starStructure=5, specificity=3
 `.trim();
 
 const ANCHORS_GENERAL = `
-ANCHOR EXAMPLES for GENERAL / SITUATIONAL questions:
+ANCHOR EXAMPLES — GENERAL:
+Strong: "I'd start by reading the README and tracing a request end-to-end. I'd run the tests before touching anything. In my previous job I onboarded onto a legacy Rails monolith in under a week this way."
+→ clarity=9, depth=7, relevance=9, communication=8, starStructure=6, specificity=8
 
-Example 1 — Strong answer:
-Answer: "If I were given an unfamiliar codebase I'd start by reading the README and any architecture docs, then trace a single user-facing request end-to-end through the stack. I'd set up the dev environment and run the tests before touching anything. In my previous job I used this approach to onboard onto a legacy Rails monolith in under a week."
-Expected: clarity=9, depth=7, relevance=9, communication=8, starStructure=6, specificity=8
-
-Example 2 — Weak answer:
-Answer: "I'd just look around the code and figure it out."
-Expected: clarity=4, depth=2, relevance=5, communication=3, starStructure=1, specificity=1
+Weak: "I'd just look around the code and figure it out."
+→ clarity=4, depth=2, relevance=5, communication=3, starStructure=1, specificity=1
 `.trim();
 
-// ─── Main Evaluation Function ─────────────────────────────────────────────────
+// ─── Main evaluation function ─────────────────────────────────────────────────
 
-/**
- * Rubric-based answer evaluation with question-type-aware scoring.
- *
- * Key improvement over v1:
- *   - Detects question type (behavioural / technical / general)
- *   - Applies appropriate rubric weights per type
- *   - Gives LLM explicit STAR instructions per type so it doesn't
- *     penalise a perfect technical answer for lacking STAR format
- *   - Returns questionType so the frontend can hide irrelevant bars
- *
- * @param {string} role
- * @param {string} questionText
- * @param {string} userAnswer
- * @param {string} difficulty
- * @returns {Promise<EvaluationResult>}
- */
 export async function evaluateAnswer(
   role,
   questionText,
@@ -177,7 +123,6 @@ export async function evaluateAnswer(
   const safeAnswer = userAnswer.trim().slice(0, 2000);
   const safeQuestion = questionText.trim().slice(0, 500);
 
-  // ── Detect question type ─────────────────────────────────────────────────
   const questionType = detectQuestionType(safeQuestion);
 
   const weights =
@@ -194,41 +139,32 @@ export async function evaluateAnswer(
         ? ANCHORS_TECHNICAL
         : ANCHORS_GENERAL;
 
-  // ── STAR instruction varies by type ──────────────────────────────────────
   const starInstruction =
     questionType === "technical"
-      ? `- starStructure: This is a TECHNICAL question. STAR format is NOT applicable here.
-         Score this dimension exactly 5 for every answer regardless of content.
-         Do NOT penalise the candidate for not using STAR format.
-         Do NOT mention STAR in keyMistakes or improvedAnswer.`
+      ? `- starStructure: TECHNICAL question — score exactly 5 (not applicable). Do NOT penalise for lack of STAR. Do NOT mention STAR in feedback.`
       : questionType === "behavioural"
-        ? `- starStructure (0-10): STAR format IS expected for this behavioural question.
-         10 = full Situation→Task→Action→Result clearly present.
-         5  = partial (some components present but incomplete).
-         1  = no structure at all.`
-        : `- starStructure (0-10): STAR is helpful but not required for this question type.
-         Award partial credit if the answer has some narrative structure.
-         5 = neutral / not applicable.`;
+        ? `- starStructure (0-10): STAR IS expected. 10=full S→T→A→R, 5=partial, 1=none.`
+        : `- starStructure (0-10): Helpful but not required. 5=neutral/not applicable.`;
 
   const messages = [
     {
       role: "system",
       content: `You are a strict but fair interview evaluator for a ${role} position.
 This is a ${questionType.toUpperCase()} question.
-Score the candidate's answer across SIX dimensions on a scale of 0–10.
+Score the candidate's answer across SIX dimensions (0–10).
 Return ONLY valid JSON. No backticks, no markdown, no extra text.
 
-Dimension definitions:
-- clarity       (0-10): How clearly is the answer communicated?
-- depth         (0-10): Technical depth and completeness. Real understanding?
-- relevance     (0-10): How directly does it address the specific question?
-- communication (0-10): Professional vocabulary, sentence structure, appropriate tone.
+Dimensions:
+- clarity       (0-10): How clearly communicated?
+- depth         (0-10): Technical depth and real understanding?
+- relevance     (0-10): Directly addresses the question?
+- communication (0-10): Professional vocabulary and tone?
 ${starInstruction}
-- specificity   (0-10): Concrete examples, numbers, names vs vague generalisations.
+- specificity   (0-10): Concrete examples vs vague generalisations?
 
 ${anchors}
 
-JSON structure to return:
+Return this JSON structure:
 {
   "clarity": number,
   "depth": number,
@@ -236,26 +172,22 @@ JSON structure to return:
   "communication": number,
   "starStructure": number,
   "specificity": number,
-  "keyMistakes": "string (max 2 sentences: what was missing or wrong)",
-  "improvedAnswer": "string (concise model answer, max 4 sentences)",
-  "strengthHighlight": "string (1 sentence: the best thing about this answer)"
+  "keyMistakes": "max 2 sentences: what was missing or wrong",
+  "improvedAnswer": "concise model answer, max 4 sentences",
+  "strengthHighlight": "1 sentence: the best thing about this answer"
 }`,
     },
     {
       role: "user",
-      content: `Difficulty level: ${difficulty}
-Question type: ${questionType}
-Question: ${safeQuestion}
-Candidate answer: ${safeAnswer}`,
+      content: `Difficulty: ${difficulty}\nQuestion type: ${questionType}\nQuestion: ${safeQuestion}\nAnswer: ${safeAnswer}`,
     },
   ];
 
   const raw = await chat(messages);
 
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+  if (!jsonMatch)
     throw new Error("No JSON found in rubric evaluation response");
-  }
 
   let parsed;
   try {
@@ -271,13 +203,11 @@ Candidate answer: ${safeAnswer}`,
     depth: clamp(parsed.depth),
     relevance: clamp(parsed.relevance),
     communication: clamp(parsed.communication),
-    // For technical questions the LLM is instructed to return 5 — we force it anyway
     starStructure:
       questionType === "technical" ? 5 : clamp(parsed.starStructure),
     specificity: clamp(parsed.specificity),
   };
 
-  // Weighted composite using type-appropriate weights
   const composite = parseFloat(
     Object.entries(weights)
       .reduce((sum, [dim, weight]) => sum + (rubric[dim] || 0) * weight, 0)
@@ -287,23 +217,15 @@ Candidate answer: ${safeAnswer}`,
   return {
     rubric,
     score: composite,
-    questionType, // ← NEW: passed to frontend
+    questionType,
     keyMistakes: (parsed.keyMistakes || "").slice(0, 500),
     improvedAnswer: (parsed.improvedAnswer || "").slice(0, 1000),
     strengthHighlight: (parsed.strengthHighlight || "").slice(0, 300),
   };
 }
 
-// ─── Skill Gap Map ────────────────────────────────────────────────────────────
+// ─── Skill gap map ────────────────────────────────────────────────────────────
 
-/**
- * Compute skill gap map from all answered questions.
- * Excludes starStructure from weak/strong area classification for
- * technical questions so they don't skew the overall skill gap map.
- *
- * @param {Array<{rubric: object, questionText: string}>} questions
- * @returns {SkillGapMap | null}
- */
 export function computeSkillGapMap(questions) {
   const withRubric = questions.filter((q) => q.rubric);
   if (withRubric.length === 0) return null;
@@ -316,32 +238,27 @@ export function computeSkillGapMap(questions) {
     "starStructure",
     "specificity",
   ];
-
   const WEAK_THRESHOLD = 6;
   const averages = {};
 
   for (const dim of dims) {
-    // For starStructure: only average across behavioural/general questions
-    // (technical questions are forced to 5 and would skew the average)
-    const relevantQuestions =
+    // Exclude technical questions from starStructure average (always forced to 5)
+    const relevant =
       dim === "starStructure"
-        ? withRubric.filter((q) => {
-            const t = detectQuestionType(q.questionText || "");
-            return t !== "technical";
-          })
+        ? withRubric.filter(
+            (q) => detectQuestionType(q.questionText || "") !== "technical",
+          )
         : withRubric;
 
-    const values = relevantQuestions
+    const values = relevant
       .map((q) => q.rubric[dim])
       .filter((v) => v !== undefined && v !== null);
 
-    if (values.length === 0) {
-      averages[dim] = null;
-      continue;
-    }
-
-    const avg = values.reduce((s, v) => s + v, 0) / values.length;
-    averages[dim] = parseFloat(avg.toFixed(2));
+    averages[dim] = values.length
+      ? parseFloat(
+          (values.reduce((s, v) => s + v, 0) / values.length).toFixed(2),
+        )
+      : null;
   }
 
   const weakAreas = dims.filter(

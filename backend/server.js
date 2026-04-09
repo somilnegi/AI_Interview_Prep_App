@@ -55,9 +55,9 @@ app.use(express.json({ limit: "1mb" }));
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-app.use("/api/auth",            authLimiter, authRoutes);
-app.use("/api/interview",       interviewRoutes);
-app.use("/api/resume",          resumeRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/interview", interviewRoutes);
+app.use("/api/resume", resumeRoutes);
 app.use("/api/job-description", jobDescriptionRoutes);
 
 app.get("/", (req, res) => {
@@ -74,7 +74,7 @@ app.use((req, res) => {
 
 // Catches anything thrown with next(err) across all routes
 app.use((err, req, res, _next) => {
-  const status  = err.status  || 500;
+  const status = err.status || 500;
   const message = err.message || "Internal server error";
 
   // Don't leak stack traces in production
@@ -91,5 +91,7 @@ app.use((err, req, res, _next) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT} [${process.env.NODE_ENV || "development"}]`);
+  console.log(
+    `Server running on port ${PORT} [${process.env.NODE_ENV || "development"}]`,
+  );
 });

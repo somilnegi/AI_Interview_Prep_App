@@ -21,25 +21,21 @@ function MultimodalOfflineCard({ onRetry, checking }) {
           </div>
         </div>
       </div>
-
       <div className="bg-white/60 rounded-lg p-3 mb-3 space-y-2">
         <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 mb-1">
           Run these commands
         </div>
         {[
-          'pip install fastapi uvicorn librosa soundfile numpy spacy',
+          'pip install fastapi uvicorn librosa soundfile numpy spacy pydub',
           'python -m spacy download en_core_web_sm',
           'uvicorn multimodal_service:app --port 8001 --reload',
         ].map((cmd, i) => (
           <div key={i} className="flex items-start gap-2">
             <span className="text-amber-500 font-bold text-xs shrink-0 mt-0.5">{i + 1}.</span>
-            <code className="text-[10px] font-mono text-amber-900 break-all leading-relaxed">
-              {cmd}
-            </code>
+            <code className="text-[10px] font-mono text-amber-900 break-all leading-relaxed">{cmd}</code>
           </div>
         ))}
       </div>
-
       <button
         onClick={onRetry}
         disabled={checking}
@@ -48,7 +44,6 @@ function MultimodalOfflineCard({ onRetry, checking }) {
         {checking ? <Spinner size="sm" /> : <span>↻</span>}
         {checking ? 'Checking…' : 'Retry connection'}
       </button>
-
       <p className="text-[10px] text-amber-600/80 text-center mt-2">
         Text answers still work fine — voice features are optional
       </p>
@@ -87,6 +82,7 @@ export default function InterviewPage() {
   const [answer,        setAnswer]        = useState('')
   const [evaluation,    setEvaluation]    = useState(null)
   const [mmData,        setMmData]        = useState(null)
+  const [mmError,       setMmError]       = useState('')
   const [theta,         setTheta]         = useState(0)
   const [thetaHistory,  setThetaHistory]  = useState([])
   const [abilityLevel,  setAbilityLevel]  = useState('Proficient (top 50%)')
@@ -94,9 +90,7 @@ export default function InterviewPage() {
   const [submitting,    setSubmitting]    = useState(false)
   const [ending,        setEnding]        = useState(false)
   const [finished,      setFinished]      = useState(false)
-  // 'checking' | 'online' | 'offline'
   const [mmStatus,      setMmStatus]      = useState('checking')
-  const [mmError,       setMmError]       = useState('')
   const [shortWarning,  setShortWarning]  = useState(false)
   const cancelStream = useRef(null)
 
@@ -159,7 +153,7 @@ export default function InterviewPage() {
 
   useEffect(() => { fetchQuestion() }, [fetchQuestion])
 
-  // ── Submit answer + optional multimodal ───────────────────────────────────
+  // ── Submit answer ──────────────────────────────────────────────────────────
   const submitAnswer = async (force = false) => {
     if (!answer.trim() && !audioBlobRef.current) return
 
@@ -179,29 +173,17 @@ export default function InterviewPage() {
       setThetaHistory(h => [...h, data.theta])
       setAbilityLevel(data.abilityLevel)
 
-      // Read blob from ref — guaranteed to be current even if called
-      // immediately after stop() before React state has flushed
       const blobToAnalyse = audioBlobRef.current
-      console.log('[MM] mmStatus:', mmStatus)
-      console.log('[MM] blobToAnalyse:', blobToAnalyse)
-      console.log('[MM] blob size:', blobToAnalyse?.size)
       if (mmStatus === 'online' && blobToAnalyse) {
         try {
-          console.log('[MM] Calling multimodalAPI.analyse...')
           const mm = await multimodalAPI.analyse(blobToAnalyse, finalAnswer)
-          console.log('[MM] Response:', mm)
           setMmData(mm)
         } catch (mmErr) {
-          console.error('[MM] Multimodal error:', mmErr)
           setMmError('Delivery analysis failed — ' + (mmErr.message || 'unknown error'))
         }
-      } else {
-        console.log('[MM] Skipped — mmStatus:', mmStatus, '| blob:', blobToAnalyse)
       }
-    } catch (e) {
-      console.error('Evaluate error:', e)
-      console.error('Evaluate error response:', e.response?.data)
-      console.error('Answer sent:', JSON.stringify(finalAnswer))
+    } catch {
+      // evaluate failed — user sees no feedback, can retry
     } finally {
       setSubmitting(false)
     }
@@ -224,7 +206,7 @@ export default function InterviewPage() {
 
   const displayQuestion = streamBuffer || questionText
 
-  // ── All questions done screen ──────────────────────────────────────────────
+  // ── All questions done ─────────────────────────────────────────────────────
   if (finished && !evaluation) {
     return (
       <div className="min-h-screen bg-surface-2 flex items-center justify-center px-6">
@@ -259,11 +241,7 @@ export default function InterviewPage() {
               Q{questionNum}
             </span>
           </div>
-          <button
-            className="btn btn-ghost btn-sm shrink-0"
-            onClick={endInterview}
-            disabled={ending}
-          >
+          <button className="btn btn-ghost btn-sm shrink-0" onClick={endInterview} disabled={ending}>
             {ending ? <Spinner size="sm" /> : 'End & get results'}
           </button>
         </div>
@@ -300,7 +278,7 @@ export default function InterviewPage() {
           {!evaluation && !loadingQ && displayQuestion && (
             <div className="space-y-4">
 
-              {/* Mic button — only when multimodal service is online */}
+              {/* Mic button — only when multimodal is online */}
               {mmStatus === 'online' && (
                 <div className="flex items-center gap-3">
                   <button
@@ -314,7 +292,6 @@ export default function InterviewPage() {
                   >
                     🎙️
                   </button>
-
                   {recording && speechSupported && (
                     <span className="text-xs text-brand-500 font-semibold animate-pulse">
                       ● Recording & transcribing…
@@ -322,7 +299,7 @@ export default function InterviewPage() {
                   )}
                   {recording && !speechSupported && (
                     <span className="text-xs text-brand-500 font-semibold animate-pulse">
-                      ● Recording… (type your answer too)
+                      ● Recording…
                     </span>
                   )}
                   {audioBlob && !recording && (
@@ -333,11 +310,11 @@ export default function InterviewPage() {
                 </div>
               )}
 
-              {/* Speech API not supported warning */}
+              {/* Browser doesn't support SpeechRecognition */}
               {mmStatus === 'online' && !speechSupported && !recording && !audioBlob && (
                 <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
                   <span>⚠️</span>
-                  <span>Live transcription needs Chrome or Edge. You can still record audio for delivery analysis — just also type your answer.</span>
+                  <span>Live transcription needs Chrome or Edge. You can still record audio — just also type your answer.</span>
                 </div>
               )}
 
@@ -355,14 +332,14 @@ export default function InterviewPage() {
                 }
               />
 
-              {/* Short / non-answer warning */}
+              {/* Short answer warning */}
               {shortWarning && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                   <div className="text-sm font-bold text-amber-800 mb-1">
                     ⚠️ This doesn't look like a full answer
                   </div>
                   <p className="text-xs text-amber-700 leading-relaxed mb-3">
-                    Your answer is very short or seems like a placeholder. The AI will still score it — but you'll get a low mark. Try giving a real response for useful feedback.
+                    Your answer is very short or seems like a placeholder. You'll get a low score. Try giving a real response for useful feedback.
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -416,7 +393,6 @@ export default function InterviewPage() {
       {/* ══ Sidebar ═════════════════════════════════════════════════════════ */}
       <div className="w-full lg:w-80 shrink-0 border-t lg:border-t-0 lg:border-l border-surface-4 bg-white p-5 space-y-4 overflow-y-auto">
 
-        {/* Ability meter */}
         <ThetaMeter
           theta={theta}
           abilityLevel={abilityLevel}
@@ -428,9 +404,9 @@ export default function InterviewPage() {
         <div className="bg-surface-2 rounded-xl p-4 space-y-2">
           <div className="text-[10px] font-bold tracking-widest uppercase text-ink-4 mb-2">Session</div>
           {[
-            { label: 'Role',       val: role,        green: false },
+            { label: 'Role',       val: role,       green: false },
             { label: 'Question',   val: questionNum, green: false },
-            { label: 'Adaptation', val: 'Active',    green: true  },
+            { label: 'Adaptation', val: 'Active',   green: true  },
           ].map(({ label, val, green }) => (
             <div key={label} className="flex justify-between items-center text-sm">
               <span className="text-ink-4">{label}</span>
@@ -442,7 +418,7 @@ export default function InterviewPage() {
           ))}
         </div>
 
-        {/* ── Multimodal section ── */}
+        {/* Multimodal section */}
         {mmData ? (
           <MultimodalPanel data={mmData} />
         ) : mmError ? (

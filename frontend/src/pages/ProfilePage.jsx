@@ -154,7 +154,7 @@ export default function ProfilePage() {
 
               {hasResume ? (
                 <div className="flex items-center gap-3 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
-                  {/* <span className="text-xl">✅</span> */}
+                  <span className="text-xl">✅</span>
                   <div className="flex-1">
                     <div className="text-sm font-semibold text-emerald-700">Resume on file</div>
                     <div className="text-xs text-ink-4 mt-0.5">Enable "Use resume" when starting</div>
