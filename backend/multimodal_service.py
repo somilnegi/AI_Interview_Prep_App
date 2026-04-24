@@ -42,7 +42,7 @@ app = FastAPI(title="Multimodal Analysis Service", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ai-interview-prep-app-9yqf.onrender.com", "https://ai-interview-prep-app-blue.vercel.app/"],
+    allow_origins=["*"],
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
