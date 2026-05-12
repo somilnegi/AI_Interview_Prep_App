@@ -171,9 +171,14 @@ def extract_acoustic_features(audio_bytes: bytes, content_type: str = "") -> dic
             if pause_len > 2.0: long_pauses += 1
             in_pause = False
 
-    f0, _, _       = librosa.pyin(y, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7"))
-    voiced_f0      = f0[~np.isnan(f0)] if f0 is not None else np.array([])
-    pitch_variance = float(np.std(voiced_f0)) if len(voiced_f0) > 0 else 0.0
+    # f0, _, _       = librosa.pyin(y, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7"))
+    # voiced_f0      = f0[~np.isnan(f0)] if f0 is not None else np.array([])
+    # pitch_variance = float(np.std(voiced_f0)) if len(voiced_f0) > 0 else 0.0
+    # energy_variance = float(np.std(rms))
+    
+    # ZCR-based expressiveness proxy — ~10x faster than pYIN, sufficient for delivery scoring
+    zcr            = librosa.feature.zero_crossing_rate(y, frame_length=frame_length, hop_length=hop_length)[0]
+    pitch_variance = round(float(np.std(zcr) * 1000), 4)   # scaled to similar range as F0 std
     energy_variance = float(np.std(rms))
 
     return {
