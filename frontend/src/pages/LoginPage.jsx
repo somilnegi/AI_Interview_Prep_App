@@ -68,11 +68,12 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} autoComplete="off" className="space-y-5">
             <div>
               <label className="label">Email address</label>
               <input
                 type="email"
+                autoComplete="new-email"
                 className="input"
                 placeholder="you@example.com"
                 value={form.email}
@@ -85,6 +86,7 @@ export default function LoginPage() {
               <label className="label">Password</label>
               <input
                 type="password"
+                autoComplete="new-password"
                 className="input"
                 placeholder="••••••••"
                 value={form.password}
